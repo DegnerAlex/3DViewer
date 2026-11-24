@@ -13,7 +13,8 @@
       {
         "title": "Viewer 3D",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "backgroundColor": "#EEF0F4"
       }
     ],
     "security": {
@@ -25,7 +26,24 @@
     }
   },
   "plugins": {
-    "cli": {}
+    "cli": {
+      "description": "Open a 3D model; optionally save a screenshot next to it",
+      "args": [
+        {
+          "name": "screenshot",
+          "description": "Save a JPG screenshot next to the opened model",
+          "takesValue": false,
+          "required": false
+        },
+        {
+          "name": "path",
+          "description": "Path to the model to open (.glb, .gltf, .fbx)",
+          "index": 1,
+          "takesValue": true,
+          "required": false
+        }
+      ]
+    }
   },
   "bundle": {
     "active": true,

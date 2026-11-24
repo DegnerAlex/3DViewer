@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { convertFbxToGlb } from "../lib/convertFbxToGlb";
 import { exportModelBlob, type ExportFormat } from "../lib/exportModel";
+import type { SceneView } from "../lib/session";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Heading, Notification } from "react-bulma-components";
 
@@ -22,6 +23,14 @@ export interface ModelViewerProps {
   background?: "light" | "dark";
   /** Render the model as wireframe mesh instead of shaded surfaces. */
   wireframe?: boolean;
+  /** Show the floor grid (default: true). */
+  grid?: boolean;
+  /** Called (throttled) whenever the camera/orbit target changes. */
+  onViewChange?: (view: SceneView) => void;
+  /** Camera pose to apply to the next loaded model (session restore). */
+  initialView?: SceneView | null;
+  /** Called after initialView has been applied (so the app can clear it). */
+  onInitialViewApplied?: () => void;
 }
 
 const BACKGROUND_COLORS = {
@@ -83,6 +92,9 @@ export default class ModelViewer extends Component<
   /** Bumped on every load so stale responses can be ignored. */
   private loadToken = 0;
 
+  /** Timestamp of the last throttled view notification. */
+  private lastViewNotify = 0;
+
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
   componentDidMount() {
@@ -112,11 +124,15 @@ export default class ModelViewer extends Component<
     if (prevProps.wireframe !== this.props.wireframe) {
       this.applyWireframe();
     }
+    if (prevProps.grid !== this.props.grid) {
+      this.applyGrid();
+    }
   }
 
   componentWillUnmount() {
     cancelAnimationFrame(this.frameId);
     window.removeEventListener("resize", this.handleResize);
+    this.controls?.removeEventListener("change", this.handleControlsChange);
     this.resizeObserver?.disconnect();
     this.controls?.dispose();
     this.clearModel();
@@ -209,6 +225,40 @@ export default class ModelViewer extends Component<
     controls.update();
   }
 
+  /** Apply a previously saved camera pose (used on session restore). */
+  setView(view: SceneView) {
+    const camera = this.camera;
+    const controls = this.controls;
+    if (!camera || !controls) return;
+
+    // Reset the throttle BEFORE updating: the synchronous change event must
+    // not be dropped, otherwise the fit pose would be reported instead.
+    this.lastViewNotify = 0;
+    camera.position.set(...view.position);
+    controls.target.set(...view.target);
+    controls.update();
+  }
+
+  /**
+   * Render one fresh frame and return it as a data URL.
+   *
+   * preserveDrawingBuffer keeps the frame readable at any moment, but a
+   * synchronous render right before reading makes the screenshot always
+   * match what is on screen (including animations mid-frame).
+   */
+  screenshot(mime: "image/png" | "image/jpeg" = "image/png"): string | null {
+    const renderer = this.renderer;
+    const scene = this.scene;
+    const camera = this.camera;
+    if (!renderer || !scene || !camera) return null;
+
+    renderer.render(scene, camera);
+    return renderer.domElement.toDataURL(
+      mime,
+      mime === "image/jpeg" ? 0.92 : undefined,
+    );
+  }
+
   // ── Scene setup / rendering ─────────────────────────────────────────────
 
   private initScene() {
@@ -246,14 +296,15 @@ export default class ModelViewer extends Component<
     rimLight.position.set(-4, 2, -3);
     this.scene.add(rimLight);
 
-    const gridColors = GRID_COLORS[(this.props.background ?? "light")];
-    const grid = new THREE.GridHelper(20, 40, gridColors.center, gridColors.grid);
-    this.scene.add(grid);
-    this.grid = grid;
+    // The grid is created by applyTheme() (it also recreates it on theme
+    // change); here we only apply the current visibility setting.
+    this.applyGrid();
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    // Report view changes (throttled) so the app can persist the pose.
+    this.controls.addEventListener("change", this.handleControlsChange);
 
     this.handleResize();
   }
@@ -279,6 +330,8 @@ export default class ModelViewer extends Component<
       gridColors.grid,
     );
     scene.add(this.grid);
+    // Recreating the grid resets visibility — reapply the current setting.
+    this.applyGrid();
   }
 
   /** Toggle wireframe rendering on every material of the current model. */
@@ -300,6 +353,13 @@ export default class ModelViewer extends Component<
         }
       }
     });
+  }
+
+  /** Show/hide the floor grid (kept in the scene, visibility only). */
+  private applyGrid() {
+    if (this.grid) {
+      this.grid.visible = this.props.grid ?? true;
+    }
   }
 
   private startLoop() {
@@ -361,6 +421,13 @@ export default class ModelViewer extends Component<
       this.clearModel();
       this.fitAndAdd(object);
       this.applyWireframe();
+
+      // Session restore: put the camera where it was last time.
+      if (this.props.initialView) {
+        console.debug("[viewer3d] applying saved view", this.props.initialView);
+        this.setView(this.props.initialView);
+        this.props.onInitialViewApplied?.();
+      }
 
       this.animations = animations ?? [];
       this.props.onAnimations?.(
@@ -438,9 +505,11 @@ export default class ModelViewer extends Component<
     controls.target.set(0, (size.y * scale) / 2, 0);
     controls.update();
 
-    // Remember the framing so resetView() can restore it.
+    // Remember the framing so resetView() can restore it, and reset the
+    // throttle so the change event below is reported, not swallowed.
     this.fitCameraPos = camera.position.clone();
     this.fitTarget.copy(controls.target);
+    this.lastViewNotify = 0;
   }
 
   // ── Animations ──────────────────────────────────────────────────────────
@@ -499,6 +568,22 @@ export default class ModelViewer extends Component<
   }
 
   // ── Resize ──────────────────────────────────────────────────────────────
+
+  /** Throttled report of camera pose while orbiting. */
+  private handleControlsChange = () => {
+    const now = Date.now();
+    if (now - this.lastViewNotify < 500) return;
+    this.lastViewNotify = now;
+
+    const camera = this.camera;
+    const controls = this.controls;
+    if (!camera || !controls) return;
+
+    this.props.onViewChange?.({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [controls.target.x, controls.target.y, controls.target.z],
+    });
+  };
 
   private handleResize = () => {
     const container = this.container;

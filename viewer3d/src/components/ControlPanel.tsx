@@ -1,8 +1,10 @@
 import { useRef } from "preact/hooks";
 import { Button, Heading } from "react-bulma-components";
 import {
+  FiCamera,
   FiFolder,
   FiGrid,
+  FiLayers,
   FiMoon,
   FiRotateCcw,
   FiSun,
@@ -23,13 +25,16 @@ interface ControlPanelProps {
   activeAnimation: number;
   selectedAnimations: boolean[];
   wireframe: boolean;
+  grid: boolean;
   exportFormat: ExportFormat;
   exporting: boolean;
   onOpenDialog: () => void;
   onOpenFile: (file: File) => void;
+  onScreenshot: () => void;
   onReset: () => void;
   onBackground: (background: "dark" | "light") => void;
-  onWireframeToggle: () => void;  onAnimationSelect: (index: number) => void;
+  onWireframeToggle: () => void;
+  onGridToggle: () => void;  onAnimationSelect: (index: number) => void;
   onAnimationToggle: (index: number) => void;
   onToggleAllAnimations: () => void;
   onRename: (index: number, name: string) => void;
@@ -45,13 +50,16 @@ export default function ControlPanel({
   activeAnimation,
   selectedAnimations,
   wireframe,
+  grid,
   exportFormat,
   exporting,
   onOpenDialog,
   onOpenFile,
+  onScreenshot,
   onReset,
   onBackground,
   onWireframeToggle,
+  onGridToggle,
   onAnimationSelect,
   onAnimationToggle,
   onToggleAllAnimations,
@@ -103,24 +111,24 @@ export default function ControlPanel({
         boxShadow: "0 4px 18px rgba(0, 0, 0, 0.25)",
       }}
     >
-      {/* Header: model name, reset and open buttons */}
-      <div className="is-flex is-align-items-center mb-4">
-        <Heading
-          size={5}
-          renderAs="h2"
-          subtitle
-          title={customModel ? customModel.name : undefined}
-          className={`panel-title is-flex-grow-1 mb-0 ${
-            isDark ? "has-text-grey-light" : "has-text-grey"
-          }`}
-        >
-          {customModel ? customModel.name : "Choose model"}
-        </Heading>
+      {/* Model name, then the action buttons on a row of their own */}
+      <Heading
+        size={5}
+        renderAs="h2"
+        subtitle
+        title={customModel ? customModel.name : undefined}
+        className={`panel-title mb-2 ${
+          isDark ? "has-text-grey-light" : "has-text-grey"
+        }`}
+      >
+        {customModel ? customModel.name : "Choose model"}
+      </Heading>
+      <div className="is-flex mb-4">
         {customModel && (
           <Button
             size="small"
             color="dark"
-            className="ml-2"
+            className="is-flex-grow-1 mr-2"
             title="Reset scene (unload model, restore defaults)"
             onClick={onReset}
           >
@@ -130,7 +138,25 @@ export default function ControlPanel({
         <Button
           size="small"
           color="dark"
-          className="ml-2"
+          className={`is-flex-grow-1${customModel ? " mr-2" : ""}`}
+          title="Save screenshot (PNG)"
+          onClick={onScreenshot}
+        >
+          <FiCamera />
+        </Button>
+        <Button
+          size="small"
+          color={grid ? "info" : "dark"}
+          className="is-flex-grow-1 mr-2"
+          title="Show/hide the floor grid"
+          onClick={onGridToggle}
+        >
+          <FiLayers />
+        </Button>
+        <Button
+          size="small"
+          color="dark"
+          className="is-flex-grow-1"
           title="Open model (.glb, .gltf, .fbx)"
           onClick={handleOpenClick}
         >

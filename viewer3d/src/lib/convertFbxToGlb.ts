@@ -1,4 +1,5 @@
-import type { Material, Mesh, Object3D, Texture } from "three";
+import type { Group, Material, Object3D, Texture } from "three";
+import { FileLoader } from "three";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
@@ -30,7 +31,10 @@ const TEXTURE_SLOTS = [
  */
 function stripEmptyTextures(object: Object3D) {
   object.traverse((child) => {
-    const mesh = child as Mesh;
+    const mesh = child as {
+      material?: Material | Material[];
+      isMesh?: boolean;
+    };
     const materials = mesh.material
       ? Array.isArray(mesh.material)
         ? mesh.material
@@ -49,7 +53,7 @@ function stripEmptyTextures(object: Object3D) {
         }
       }
       if (touched) {
-        (material as Material).needsUpdate = true;
+        material.needsUpdate = true;
       }
     }
   });
@@ -58,9 +62,13 @@ function stripEmptyTextures(object: Object3D) {
 /**
  * Load an .fbx file and convert it to a binary .glb blob in memory.
  *
+ * The FBX is fetched as a buffer and parsed explicitly (instead of
+ * FBXLoader.loadAsync) so that parse errors — which that helper cannot
+ * report, they escape as uncaught exceptions — surface as a normal
+ * rejected promise the UI can display.
+ *
  * Animations are carried over: FBXLoader's AnimationClips are passed to
- * GLTFExporter, so the resulting GLB keeps every clip (verified by feeding
- * the returned URL back into GLTFLoader).
+ * GLTFExporter, so the resulting GLB keeps every clip.
  *
  * The caller owns the returned blob: URL and must revokeObjectURL it when
  * done (the viewer does this as soon as the GLB has loaded).
@@ -69,7 +77,21 @@ export async function convertFbxToGlb(
   url: string,
   onProgress?: (xhr: ProgressEvent) => void,
 ): Promise<string> {
-  const fbx = await new FBXLoader().loadAsync(url, onProgress);
+  // Network errors reject properly through FileLoader.
+  const buffer = await new FileLoader()
+    .setResponseType("arraybuffer")
+    .loadAsync(url, onProgress);
+
+  // Parse errors must be caught here: FBXLoader.loadAsync cannot report them.
+  let fbx: Group;
+  try {
+    const texturePath = url.substring(0, url.lastIndexOf("/") + 1);
+    fbx = new FBXLoader().parse(buffer as ArrayBuffer, texturePath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse FBX file: ${message}`);
+  }
+
   stripEmptyTextures(fbx);
 
   const exporter = new GLTFExporter();

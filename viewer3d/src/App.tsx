@@ -19,7 +19,7 @@ import {
   type CustomModel,
 } from "./lib/models";
 import { assetUrl, isTauriRuntime } from "./lib/tauri";
-import { loadSession, saveSession } from "./lib/session";
+import { loadSession, saveSession, type SceneView } from "./lib/session";
 import type { ExportFormat } from "./lib/exportModel";
 
 interface AppProps {}
@@ -34,12 +34,16 @@ interface AppState {
   background: "dark" | "light";
   /** Render the model as wireframe mesh. */
   wireframe: boolean;
+  /** Show the floor grid. */
+  grid: boolean;
   /** Format for the Save button (glb by default). */
   exportFormat: ExportFormat;
   /** True while an export is running. */
   exporting: boolean;
   /** Per-animation checkbox: include the clip in the next export. */
   selectedAnimations: boolean[];
+  /** Camera pose restored from the session, applied to the restored model. */
+  restoredView: SceneView | null;
 }
 
 export default class App extends Component<AppProps, AppState> {
@@ -50,9 +54,11 @@ export default class App extends Component<AppProps, AppState> {
     dragActive: false,
     background: "light",
     wireframe: false,
+    grid: true,
     exportFormat: "glb",
     exporting: false,
     selectedAnimations: [],
+    restoredView: null,
   };
 
   /** Ref to the viewer, used for the imperative export/rename calls. */
@@ -66,6 +72,20 @@ export default class App extends Component<AppProps, AppState> {
 
   /** Unlisten function for CLI args forwarded by the single-instance plugin. */
   private unlistenCli: (() => void) | null = null;
+
+  /** Latest reported camera pose, included in session saves. */
+  private currentView: SceneView | null = null;
+  /** When set, save a JPG screenshot next to the next loaded model (CLI). */
+  private autoScreenshot = false;
+  /** Debounce timer for view-pose session saves. */
+  private viewSaveTimer: number | null = null;
+
+  /** Flush the session when the window is closed or hidden. */
+  private handleAppHide = (e: Event) => {
+    if (e.type === "pagehide" || document.visibilityState === "hidden") {
+      this.persistSession();
+    }
+  };
 
   componentDidMount() {
     // Fade out and remove the static splash screen from index.html.
@@ -91,6 +111,11 @@ export default class App extends Component<AppProps, AppState> {
 
     // Last model + scene settings from the previous run.
     this.restoreSession();
+
+    // Flush the camera pose when the window is closed or hidden — the
+    // debounced save may not fire otherwise.
+    window.addEventListener("pagehide", this.handleAppHide);
+    document.addEventListener("visibilitychange", this.handleAppHide);
   }
 
   componentWillUnmount() {
@@ -106,6 +131,12 @@ export default class App extends Component<AppProps, AppState> {
       window.removeEventListener("drop", this.handleDrop);
     }
     this.revokeCustomModel();
+    if (this.viewSaveTimer !== null) {
+      window.clearTimeout(this.viewSaveTimer);
+      this.viewSaveTimer = null;
+    }
+    window.removeEventListener("pagehide", this.handleAppHide);
+    document.removeEventListener("visibilitychange", this.handleAppHide);
   }
 
   componentDidUpdate(
@@ -116,15 +147,29 @@ export default class App extends Component<AppProps, AppState> {
     if (
       prevState.background !== this.state.background ||
       prevState.wireframe !== this.state.wireframe ||
+      prevState.grid !== this.state.grid ||
       prevState.customModel !== this.state.customModel
     ) {
-      const { customModel, background, wireframe } = this.state;
-      saveSession({
-        background,
-        wireframe,
-        modelPath: customModel?.path,
-      });
+      this.persistSession();
     }
+  }
+
+  /** Write the current session (settings + latest camera pose) to localStorage.
+   * When no pose is known yet, the previously saved one is preserved instead
+   * of being wiped (e.g. during startup, before the model has loaded). */
+  private persistSession() {
+    const { customModel, background, wireframe, grid } = this.state;
+    const view =
+      this.currentView ??
+      loadSession()?.view ??
+      undefined;
+    saveSession({
+      background,
+      wireframe,
+      grid,
+      modelPath: customModel?.path,
+      view,
+    });
   }
 
   // ── Session ────────────────────────────────────────────────────────────
@@ -136,7 +181,11 @@ export default class App extends Component<AppProps, AppState> {
    */
   private restoreSession() {
     const saved = loadSession();
-    if (!saved) return;
+    if (!saved) {
+      console.debug("[viewer3d] no session found");
+      return;
+    }
+    console.debug("[viewer3d] session:", JSON.stringify(saved));
 
     const modelPath = saved.modelPath;
     if (isTauriRuntime() && modelPath && SUPPORTED_PATTERN.test(modelPath)) {
@@ -144,6 +193,8 @@ export default class App extends Component<AppProps, AppState> {
       void exists(modelPath)
         .then((fileExists) => {
           if (!fileExists) return;
+          // Same model → restore its saved camera pose after it loads.
+          this.setState({ restoredView: saved.view ?? null });
           this.loadCustomModel(
             pathBasename(modelPath),
             assetUrl(modelPath),
@@ -156,6 +207,7 @@ export default class App extends Component<AppProps, AppState> {
     this.setState({
       background: saved.background === "dark" ? "dark" : "light",
       wireframe: Boolean(saved.wireframe),
+      grid: saved.grid ?? true,
     });
   }
 
@@ -168,6 +220,7 @@ export default class App extends Component<AppProps, AppState> {
       customModel: null,
       background: "light",
       wireframe: false,
+      grid: true,
     });
     // The viewer clears the model, animations and camera on its own when the
     // URL becomes empty (onAnimations fires with []).
@@ -181,6 +234,10 @@ export default class App extends Component<AppProps, AppState> {
     this.setState(({ wireframe }) => ({ wireframe: !wireframe }));
   };
 
+  private handleGridToggle = () => {
+    this.setState(({ grid }) => ({ grid: !grid }));
+  };
+
   // ── Animations ─────────────────────────────────────────────────────────
 
   private handleAnimations = (names: string[]) => {
@@ -190,6 +247,45 @@ export default class App extends Component<AppProps, AppState> {
       // Every newly loaded model starts with all clips selected for export.
       selectedAnimations: names.map(() => true),
     });
+
+    // CLI --screenshot: capture a JPG shortly after the model is on screen
+    // (the delay lets textures decode, so the shot is not blank).
+    if (this.autoScreenshot) {
+      this.autoScreenshot = false;
+      window.setTimeout(() => void this.saveAutoScreenshot(), 500);
+    }
+  };
+
+  /** Save <model-name>.jpg next to the model file (CLI --screenshot). */
+  private async saveAutoScreenshot() {
+    const viewer = this.viewerRef.current;
+    const model = this.state.customModel;
+    if (!viewer || !model?.path) return;
+
+    try {
+      const dataUrl = viewer.screenshot("image/jpeg");
+      if (!dataUrl) return;
+
+      // Strip the file name, keep the directory separator.
+      const dir = model.path.replace(/[^\\/]+$/, "");
+      const outPath = `${dir}${modelStem(model.name)}.jpg`;
+
+      const blob = dataUrlToBlob(dataUrl);
+      await writeFile(outPath, new Uint8Array(await blob.arrayBuffer()));
+      console.debug("[viewer3d] screenshot saved:", outPath);
+    } catch (err) {
+      console.error("Failed to save auto screenshot:", err);
+    }
+  }  /** Camera moved: remember the pose and persist it (debounced). */
+  private handleViewChange = (view: SceneView) => {
+    this.currentView = view;
+    if (this.viewSaveTimer !== null) {
+      window.clearTimeout(this.viewSaveTimer);
+    }
+    this.viewSaveTimer = window.setTimeout(() => {
+      this.viewSaveTimer = null;
+      this.persistSession();
+    }, 300);
   };
 
   private handleAnimationSelect = (index: number) => {
@@ -227,6 +323,8 @@ export default class App extends Component<AppProps, AppState> {
   /** Common path for every way a model enters the app (drop, dialog, picker). */
   private loadCustomModel(name: string, url: string, path?: string) {
     this.revokeCustomModel();
+    // The old model's camera pose must not leak into the new one.
+    this.currentView = null;
     this.setState({ customModel: { name, url, path } });
   }
 
@@ -242,13 +340,19 @@ export default class App extends Component<AppProps, AppState> {
   private async setupTauriCli() {
     try {
       const matches = await getMatches();
-      const raw = matches.args._?.value;
-      const positionals = Array.isArray(raw) ? raw : raw !== undefined ? [raw] : [];
-      const path = positionals.find(
-        (value): value is string =>
-          typeof value === "string" && SUPPORTED_PATTERN.test(value),
-      );
-      if (path) {
+      const raw = matches.args.path?.value;
+      const path =
+        typeof raw === "string"
+          ? raw
+          : Array.isArray(raw)
+            ? raw.find((v): v is string => typeof v === "string")
+            : undefined;
+
+      if (path && SUPPORTED_PATTERN.test(path)) {
+        if (matches.args.screenshot) {
+          // Headless-ish usage: capture a JPG right after the model loads.
+          this.autoScreenshot = true;
+        }
         this.loadCustomModel(pathBasename(path), assetUrl(path), path);
       }
     } catch (err) {
@@ -256,13 +360,19 @@ export default class App extends Component<AppProps, AppState> {
     }
 
     this.unlistenCli = await listen<string[]>("cli-args", (event) => {
-      const path = event.payload.find((value) =>
-        SUPPORTED_PATTERN.test(value),
-      );
-      if (!path) return;
-
-      this.loadCustomModel(pathBasename(path), assetUrl(path), path);
+      this.handleCliArgs(event.payload);
     });
+  }
+
+  /** Shared handling of forwarded argv (single-instance launches). */
+  private handleCliArgs(argv: string[]) {
+    const path = argv.find((value) => SUPPORTED_PATTERN.test(value));
+    if (!path) return;
+
+    if (argv.includes("--screenshot") || argv.includes("-s")) {
+      this.autoScreenshot = true;
+    }
+    this.loadCustomModel(pathBasename(path), assetUrl(path), path);
   }
 
   /** Open button: native file dialog (Tauri runtime only). */
@@ -286,6 +396,30 @@ export default class App extends Component<AppProps, AppState> {
   };
 
   // ── Export ─────────────────────────────────────────────────────────────
+
+  /** Capture the current frame and save it as PNG. */
+  private handleScreenshot = async () => {
+    const viewer = this.viewerRef.current;
+    if (!viewer) return;
+
+    try {
+      const dataUrl = viewer.screenshot();
+      if (!dataUrl) return;
+
+      const blob = dataUrlToBlob(dataUrl);
+      const name = this.state.customModel
+        ? `${modelStem(this.state.customModel.name)}-screenshot.png`
+        : "screenshot.png";
+
+      if (isTauriRuntime()) {
+        await this.saveViaTauri(blob, name, "png");
+      } else {
+        downloadBlob(blob, name);
+      }
+    } catch (err) {
+      console.error("Screenshot failed:", err);
+    }
+  };
 
   private handleExportFormat = (format: ExportFormat) => {
     this.setState({ exportFormat: format });
@@ -321,7 +455,7 @@ export default class App extends Component<AppProps, AppState> {
   };
 
   /** Native save dialog + file write (works on WebKitGTK, unlike <a download>). */
-  private async saveViaTauri(blob: Blob, fileName: string, format: ExportFormat) {
+  private async saveViaTauri(blob: Blob, fileName: string, format: string) {
     const path = await save({
       defaultPath: fileName,
       filters: [{ name: format.toUpperCase(), extensions: [format] }],
@@ -405,9 +539,11 @@ export default class App extends Component<AppProps, AppState> {
       dragActive,
       background,
       wireframe,
+      grid,
       exportFormat,
       exporting,
       selectedAnimations,
+      restoredView,
     } = this.state;
 
     const isDark = background === "dark";
@@ -423,8 +559,12 @@ export default class App extends Component<AppProps, AppState> {
           }
           animationIndex={activeAnimation}
           onAnimations={this.handleAnimations}
+          onViewChange={this.handleViewChange}
+          initialView={restoredView}
+          onInitialViewApplied={() => this.setState({ restoredView: null })}
           background={background}
           wireframe={wireframe}
+          grid={grid}
         />
 
         <ControlPanel
@@ -434,13 +574,16 @@ export default class App extends Component<AppProps, AppState> {
           activeAnimation={activeAnimation}
           selectedAnimations={selectedAnimations}
           wireframe={wireframe}
+          grid={grid}
           exportFormat={exportFormat}
           exporting={exporting}
           onOpenDialog={this.handleOpenDialog}
           onOpenFile={this.handleOpenFile}
+          onScreenshot={this.handleScreenshot}
           onReset={this.handleReset}
           onBackground={this.handleBackgroundSelect}
           onWireframeToggle={this.handleWireframeToggle}
+          onGridToggle={this.handleGridToggle}
           onAnimationSelect={this.handleAnimationSelect}
           onAnimationToggle={this.handleAnimationToggle}
           onToggleAllAnimations={this.handleToggleAllAnimations}
@@ -464,4 +607,16 @@ function downloadBlob(blob: Blob, fileName: string) {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+/** Convert a canvas toDataURL() result into a Blob. */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [meta, base64] = dataUrl.split(",");
+  const mime = meta.match(/data:(.*?)(;|$)/)?.[1] ?? "image/png";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
 }
