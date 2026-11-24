@@ -4,7 +4,7 @@ A lightweight desktop 3D model viewer built with Tauri, Preact and three.js.
 Open `.glb`, `.gltf` or `.fbx` models by drag & drop, from the file dialog or
 straight from the command line, inspect their animations and export them.
 
-<img width="1244" height="1016" alt="image" src="https://github.com/user-attachments/assets/0bf34669-9f13-448a-8850-c9288d36ab6d" />
+<img width="800" height="600" alt="image" src="https://github.com/user-attachments/assets/0bf34669-9f13-448a-8850-c9288d36ab6d" />
 
 
 
