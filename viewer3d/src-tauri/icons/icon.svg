@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  
+  <polygon points="128,128 32,73 32,183 128,238" fill="#18A9F0" />
+  
+  <polygon points="128,128 224,73 224,183 128,238" fill="#8E38C9" />
+  
+  <defs>
+    <linearGradient id="topFaceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#36C2F8" />
+      <stop offset="100%" stop-color="#B05CE6" />
+    </linearGradient>
+  </defs>
+  <polygon points="128,18 224,73 128,128 32,73" fill="url(#topFaceGrad)" />
+</svg>

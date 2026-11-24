@@ -1,0 +1,358 @@
+/*
+ * App.scss — all application styles.
+ *
+ * Bulma is pulled in here and then re-themed to look like Breeze,
+ * the KDE Plasma style.
+ *
+ * Palette follows the KDE Breeze color scheme:
+ *   highlight #3daee9, positive #27ae60, neutral #f67400, danger #da4453,
+ *   light window #eff0f1 / view #fcfcfc, dark window #232629 / view #2a2e32.
+ * Light values live on .breeze-light, dark ones on .breeze-dark; the wrapper
+ * class is set from the app's background theme (see App.tsx).
+ */
+
+@import "bulma/css/bulma.min.css";
+
+/* Window background matches the default (light) scene background so there is
+ * no flash of another color before the canvas paints. */
+body {
+  background-color: #eef0f4;
+}
+
+/* ── Breeze palette ──────────────────────────────────────────────────── */
+
+@mixin breeze-theme($map) {
+  @each $name, $value in $map {
+    --breeze-#{$name}: #{$value};
+  }
+}
+
+$themes: (
+  light: (
+    view: #fcfcfc,
+    button: #fcfcfc,
+    button-hover: #e9ebec,
+    border: #b9bfc5,
+    text: #232629,
+    text-dim: #7f8c8d,
+    highlight: #3daee9,
+    highlight-text: #fcfcfc,
+  ),
+  dark: (
+    view: #2a2e32,
+    button: #31363b,
+    button-hover: #3d434a,
+    border: #4c5359,
+    text: #fcfcfc,
+    text-dim: #a6aaad,
+    highlight: #3daee9,
+    highlight-text: #fcfcfc,
+  ),
+);
+
+@each $theme, $colors in $themes {
+  .breeze-#{$theme} {
+    @include breeze-theme($colors);
+
+    font-family: "Noto Sans", "Oxygen", "Ubuntu", "DejaVu Sans", sans-serif;
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+
+    .button {
+      background-color: var(--breeze-button);
+      border: 1px solid var(--breeze-border);
+      border-radius: 6px;
+      box-shadow: none;
+      color: var(--breeze-text);
+      font-weight: 500;
+      height: auto;
+      padding: 0.45em 0.9em;
+      transition:
+        background-color 120ms ease,
+        border-color 120ms ease,
+        color 120ms ease;
+
+      /* Plasma hover: slightly raised background + highlight-colored border. */
+      &:hover {
+        background-color: var(--breeze-button-hover);
+        border-color: var(--breeze-highlight);
+        color: var(--breeze-text);
+      }
+
+      /* Plasma focus: thin highlight ring inside the widget. */
+      &:focus:not(:active) {
+        box-shadow: inset 0 0 0 1px var(--breeze-highlight);
+      }
+
+      /* Selected item: solid Breeze highlight, like a checked Plasma list entry. */
+      &.is-primary,
+      &.is-info {
+        background-color: var(--breeze-highlight);
+        border-color: var(--breeze-highlight);
+        color: var(--breeze-highlight-text);
+
+        &:hover {
+          filter: brightness(1.08);
+        }
+
+        &:focus:not(:active) {
+          box-shadow: inset 0 0 0 1px var(--breeze-highlight-text);
+        }
+      }
+
+      /* "dark" Bulma buttons act as the neutral unselected button here. */
+      &.is-dark {
+        background-color: var(--breeze-button);
+        border-color: var(--breeze-border);
+        color: var(--breeze-text);
+
+        &:hover {
+          background-color: var(--breeze-button-hover);
+          border-color: var(--breeze-highlight);
+          color: var(--breeze-text);
+        }
+      }
+
+      /* Disabled widgets are simply dimmed, like in Plasma dialogs. */
+      &[disabled] {
+        opacity: 0.55;
+        border-color: var(--breeze-border);
+      }
+    }
+
+    /* ── Text input (animation rename) ───────────────────────────────── */
+
+    .input {
+      background-color: var(--breeze-view);
+      border: 1px solid var(--breeze-border);
+      border-radius: 6px;
+      color: var(--breeze-text);
+      box-shadow: none;
+      min-width: 0;
+
+      &:focus {
+        border-color: var(--breeze-highlight);
+        box-shadow: inset 0 0 0 1px var(--breeze-highlight);
+      }
+    }
+
+    /* Panel title: long model names truncate with an ellipsis instead of
+     * wrapping or widening the panel */
+    .panel-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Custom checkbox (animation export selection) ────────────────── */
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      cursor: pointer;
+
+      /* the native control stays for a11y but is invisible */
+      input {
+        position: absolute;
+        width: 0;
+        height: 0;
+        opacity: 0;
+      }
+
+      .check-box {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 15px;
+        height: 15px;
+        border: 1px solid var(--breeze-border);
+        border-radius: 4px;
+        background-color: var(--breeze-view);
+        color: var(--breeze-highlight-text);
+        transition:
+          background-color 120ms ease,
+          border-color 120ms ease;
+
+        svg {
+          width: 11px;
+          height: 11px;
+          stroke-width: 3.2;
+          opacity: 0;
+          transition: opacity 100ms ease;
+        }
+      }
+
+      &:hover .check-box {
+        border-color: var(--breeze-highlight);
+      }
+
+      input:checked + .check-box {
+        background-color: var(--breeze-highlight);
+        border-color: var(--breeze-highlight);
+
+        svg {
+          opacity: 1;
+        }
+      }
+
+      input:focus-visible + .check-box {
+        box-shadow: inset 0 0 0 1px var(--breeze-highlight);
+      }
+    }
+
+    /* Animation buttons: left-aligned names, long names get an ellipsis
+     * instead of widening the panel */
+    .animation-btn {
+      justify-content: flex-start;
+      text-align: left;
+      min-width: 0;
+
+      .anim-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    /* Compact pencil button next to animation buttons */
+    .rename-btn {
+      flex-shrink: 0;
+      padding-left: 0.55em;
+      padding-right: 0.55em;
+
+      /* vertically align the feather icon with the button text baseline */
+      svg {
+        display: block;
+      }
+    }
+
+    /* Icon inside a labeled button */
+    .btn-icon {
+      margin-right: 0.45em;
+      vertical-align: -0.125em;
+    }
+
+    /* ── Select (export format dropdown) ─────────────────────────────── */
+
+    .select {
+      min-width: 0;
+
+      select {
+        width: 100%;
+      }
+    }
+
+    .select select {
+      background-color: var(--breeze-button);
+      border: 1px solid var(--breeze-border);
+      border-radius: 6px;
+      color: var(--breeze-text);
+      font-weight: 500;
+      height: auto;
+      /* generous right padding keeps the label clear of the dropdown arrow */
+      padding: 0.45em 2.4em 0.45em 0.9em;
+      min-width: 11.5em;
+
+      &:hover {
+        border-color: var(--breeze-highlight);
+      }
+
+      &:focus:not(:active) {
+        box-shadow: inset 0 0 0 1px var(--breeze-highlight);
+      }
+
+      option {
+        color: #232629; /* native popup list stays readable */
+      }
+    }
+
+    .select::after {
+      border-color: var(--breeze-text) !important;
+    }
+
+    /* ── Notifications ───────────────────────────────────────────────── */
+
+    .notification {
+      border-radius: 6px;
+
+      &.is-danger,
+      &.is-danger.is-light {
+        background-color: #da4453;
+        color: #fcfcfc;
+      }
+    }
+
+    /* ── Progress bar (export overlay) ───────────────────────────────── */
+
+    .progress {
+      border-radius: 4px;
+      background-color: var(--breeze-button-hover);
+
+      &::-webkit-progress-bar {
+        background-color: var(--breeze-button-hover);
+      }
+      &::-webkit-progress-value {
+        background-color: var(--breeze-highlight);
+      }
+      &::-moz-progress-bar {
+        background-color: var(--breeze-highlight);
+      }
+      /* indeterminate stripes use the highlight color too */
+      &:indeterminate {
+        background-image: linear-gradient(
+          to right,
+          transparent 0%,
+          var(--breeze-highlight) 30%,
+          var(--breeze-highlight) 70%,
+          transparent 100%
+        );
+        background-size: 50% 100%;
+        background-repeat: no-repeat;
+        animation: breeze-progress-slide 1.2s ease-in-out infinite;
+
+        &::-webkit-progress-bar {
+          background-color: transparent;
+        }
+      }
+    }
+
+    @keyframes breeze-progress-slide {
+      from {
+        background-position: -50% 0;
+      }
+      to {
+        background-position: 150% 0;
+      }
+    }
+
+    /* ── Headings / text helpers ─────────────────────────────────────── */
+
+    .title,
+    .subtitle {
+      font-weight: 500;
+    }
+
+    .has-text-grey-light {
+      color: var(--breeze-text-dim) !important;
+    }
+
+    /* ── Scrollbars (Breeze style) ───────────────────────────────────── */
+
+    ::-webkit-scrollbar {
+      width: 10px;
+
+      &-thumb {
+        background-color: var(--breeze-border);
+        border-radius: 5px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+
+        &:hover {
+          background-color: var(--breeze-highlight);
+        }
+      }
+    }
+  }
+}
