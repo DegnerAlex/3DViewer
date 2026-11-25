@@ -438,7 +438,6 @@ export default class ModelViewer extends Component<
 
       // Session restore: put the camera where it was last time.
       if (this.props.initialView) {
-        console.debug("[viewer3d] applying saved view", this.props.initialView);
         this.setView(this.props.initialView);
         this.props.onInitialViewApplied?.();
       }

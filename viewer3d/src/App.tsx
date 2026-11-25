@@ -195,11 +195,7 @@ export default class App extends Component<AppProps, AppState> {
    */
   private restoreSession() {
     const saved = loadSession();
-    if (!saved) {
-      console.debug("[viewer3d] no session found");
-      return;
-    }
-    console.debug("[viewer3d] session:", JSON.stringify(saved));
+    if (!saved) return;
 
     const modelPath = saved.modelPath;
     if (isTauriRuntime() && modelPath && SUPPORTED_PATTERN.test(modelPath)) {
@@ -286,7 +282,6 @@ export default class App extends Component<AppProps, AppState> {
 
       const blob = dataUrlToBlob(dataUrl);
       await writeFile(outPath, new Uint8Array(await blob.arrayBuffer()));
-      console.debug("[viewer3d] screenshot saved:", outPath);
     } catch (err) {
       console.error("Failed to save auto screenshot:", err);
     }
